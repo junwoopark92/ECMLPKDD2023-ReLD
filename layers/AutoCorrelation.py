@@ -1,4 +1,5 @@
 import torch
+import torch.fft
 import torch.nn as nn
 import torch.nn.functional as F
 import matplotlib.pyplot as plt
@@ -33,7 +34,7 @@ class AutoCorrelation(nn.Module):
         length = values.shape[3]
         # find top k
         top_k = int(self.factor * math.log(length))
-        mean_value = torch.mean(torch.mean(corr, dim=1), dim=1)
+        mean_value = torch.mean(torch.mean(corr, dim=1), dim=1) # B, NH, D, L > B, L
         index = torch.topk(torch.mean(mean_value, dim=0), top_k, dim=-1)[1]
         weights = torch.stack([mean_value[:, index[i]] for i in range(top_k)], dim=-1)
         # update corr
@@ -116,6 +117,7 @@ class AutoCorrelation(nn.Module):
         k_fft = torch.fft.rfft(keys.permute(0, 2, 3, 1).contiguous(), dim=-1)
         res = q_fft * torch.conj(k_fft)
         corr = torch.fft.irfft(res, dim=-1)
+        # print(corr.shape) # B, NH, D, L
 
         # time delay agg
         if self.training:
