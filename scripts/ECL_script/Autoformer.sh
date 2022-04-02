@@ -1,6 +1,5 @@
 export CUDA_VISIBLE_DEVICES=1
 
-
 python -u run.py \
   --is_training 1 \
   --root_path ./dataset/electricity/ \

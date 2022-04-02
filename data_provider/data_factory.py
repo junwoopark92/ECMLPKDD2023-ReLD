@@ -6,11 +6,15 @@ data_dict = {
     'ETTh2': Dataset_ETT_hour,
     'ETTm1': Dataset_ETT_minute,
     'ETTm2': Dataset_ETT_minute,
+    'weather': Dataset_Custom,
+    'traffic': Dataset_Custom,
+    'exchange': Dataset_Custom,
+    'ecl': Dataset_Custom,
     'custom': Dataset_Custom,
 }
 
 
-def data_provider(args, flag):
+def data_provider(args, flag, max_val):
     Data = data_dict[args.data]
     timeenc = 0 if args.embed != 'timeF' else 1
 
@@ -39,7 +43,9 @@ def data_provider(args, flag):
         features=args.features,
         target=args.target,
         timeenc=timeenc,
-        freq=freq
+        freq=freq,
+        reweight=args.reweight,
+        max_val=max_val
     )
     print(flag, len(data_set))
     data_loader = DataLoader(

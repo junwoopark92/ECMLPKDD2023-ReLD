@@ -7,14 +7,164 @@ from torch.utils.data import Dataset, DataLoader
 from sklearn.preprocessing import StandardScaler
 from utils.timefeatures import time_features
 import warnings
+from statsmodels.tsa.api import acf
+from statsmodels.tsa.seasonal import seasonal_decompose
 
 warnings.filterwarnings('ignore')
 
+from scipy.ndimage import convolve1d
+from scipy.ndimage import gaussian_filter1d
+from scipy.signal.windows import triang
+
+
+def z_test(p, s):
+    p_m = p.mean(axis=1)
+    p_n = p.shape[1]
+    p_v = p.std(axis=1)**2
+
+    s_m = s.mean(axis=1)
+    s_n = s.shape[1]
+    s_v = s.std(axis=1)**2
+    z = (p_m - s_m) / np.sqrt(p_v/p_n + s_v/s_n + 1e-4)
+    return z
+
+
+def get_lds_kernel_window(kernel, ks, sigma):
+    assert kernel in ['gaussian', 'triang', 'laplace']
+    half_ks = (ks - 1) // 2
+    if kernel == 'gaussian':
+        base_kernel = [0.] * half_ks + [1.] + [0.] * half_ks
+        kernel_window = gaussian_filter1d(base_kernel, sigma=sigma) / max(gaussian_filter1d(base_kernel, sigma=sigma))
+    elif kernel == 'triang':
+        kernel_window = triang(ks)
+    else:
+        laplace = lambda x: np.exp(-abs(x) / sigma) / (2. * sigma)
+        kernel_window = list(map(laplace, np.arange(-half_ks, half_ks + 1))) / max(map(laplace, np.arange(-half_ks, half_ks + 1)))
+
+    return kernel_window
+
+
+def cal_weights(labels, reweight, max_target=51, lds=False, lds_kernel='gaussian', lds_ks=5, lds_sigma=2):
+    assert reweight in {'none', 'inverse', 'sqrt_inv'}
+    assert reweight != 'none' if lds else True, \
+        "Set reweight to \'sqrt_inv\' (default) or \'inverse\' when using LDS"
+
+    value_dict = {x: 0 for x in range(max_target)}
+    # mbr
+    for label in labels:
+        value_dict[min(max_target - 1, int(label))] += 1
+    if reweight == 'sqrt_inv':
+        value_dict = {k: np.sqrt(v) for k, v in value_dict.items()}
+    elif reweight == 'inverse':
+        value_dict = {k: np.clip(v, 5, 1000) for k, v in value_dict.items()}  # clip weights for inverse re-weight
+    num_per_label = [value_dict[min(max_target - 1, int(label))] for label in labels]
+    if not len(num_per_label) or reweight == 'none':
+        return None
+    print(f"Using re-weighting: [{reweight.upper()}]")
+
+    if lds:
+        lds_kernel_window = get_lds_kernel_window(lds_kernel, lds_ks, lds_sigma)
+        print(f'Using LDS: [{lds_kernel.upper()}] ({lds_ks}/{lds_sigma})')
+        smoothed_value = convolve1d(
+            np.asarray([v for _, v in value_dict.items()]), weights=lds_kernel_window, mode='constant')
+        num_per_label = [smoothed_value[min(max_target - 1, int(label))] for label in labels]
+
+    # weights = [np.float32(1 / x) for x in num_per_label]
+    weights = [np.float32(x) for x in num_per_label]
+    scaling = len(weights) / np.sum(weights)
+    weights = [scaling * x for x in weights]
+    return weights
+
+
+def get_periodic_diff(inputs, targets):
+    period_diff = []
+    for idx in range(inputs.shape[0]):
+        diffs = []
+        for dim in range(inputs.shape[2]):
+            x = inputs[idx,:,dim]
+            y = targets[idx, :, dim]
+            auto_x = torch.from_numpy(acf(x)).float()
+            auto_y = torch.from_numpy(acf(y)).float()
+            diff = torch.abs(auto_x - auto_y).mean()
+
+            diffs.append(diff)
+        diffs = torch.stack(diffs)
+        period_diff.append(diffs)
+    return torch.stack(period_diff)
+
+def get_decomposed_data(inputs, targets):
+    B, IL, D = inputs.shape
+    B, TL, D = targets.shape
+    # (B, L, D)
+    # (IL,D) cat (B-1, D) cat (TL, D)> (TL + B - 1 + TL, D)
+    series = np.concatenate([inputs[0], inputs[1:, -1, :], targets[-1]], axis=0)
+    print(inputs[0].shape, inputs[1:, -1, :].shape, targets[-1].shape)
+    decomposed_series = seasonal_decompose(series, model='additive', period=IL + TL)
+    is1d = (len(decomposed_series.observed.shape) == 1)
+
+    observed = np.expand_dims(decomposed_series.observed, axis=1) if is1d else decomposed_series.observed
+    trend = np.expand_dims(decomposed_series.trend, axis=1) if is1d else decomposed_series.trend
+    seasonal = np.expand_dims(decomposed_series.seasonal, axis=1) if is1d else decomposed_series.seasonal
+
+    trend_series = pd.DataFrame(trend).fillna(method='bfill').fillna(method='ffill').values
+    print(observed.shape, trend_series.shape, seasonal.shape)
+
+    remainder = observed - trend_series - seasonal
+    # remainder (IL + B - 1 + TL, D)
+    remainder_windows = torch.from_numpy(np.lib.stride_tricks.sliding_window_view(remainder, (IL + TL, D)))
+    remainder_windows = remainder_windows.squeeze(1) # (B, 1, IL, TL) > (B, IL, TL)
+    remainder_inputs, remainder_targets = remainder_windows[:, :IL, :],  remainder_windows[:, TL:, :]
+    print(inputs.shape, remainder_inputs.shape)
+    assert inputs.shape == remainder_inputs.shape
+    assert targets.shape == remainder_targets.shape
+    return remainder_inputs, remainder_targets
+
+def digitize_gap(inputs, targets, max_val=None, n_bins=200):
+    B, XL, D = inputs.shape
+    B, YL, D = targets.shape
+
+    CL = YL if XL > YL else XL
+    # inputs = inputs[:, -CL:, :]
+    # targets = targets[:, :CL, :]
+
+    # pdiff = get_periodic_diff(inputs, targets).numpy()
+    diff_mus = z_test(inputs, targets).mean(axis=1)
+    #diff_mus = (np.abs(inputs.mean(axis=1) - targets.mean(axis=1))).mean(axis=1)
+    # print(pdiff.min(), pdiff.max(),  diff_mus.min(), diff_mus.max())
+
+    if max_val is None:
+        max_val = diff_mus.max()
+        min_val = diff_mus.min()
+        print(diff_mus.shape, max_val, min_val)
+    bins = np.linspace(min_val, max_val, n_bins)
+    bin_labels = np.digitize(diff_mus, bins=bins) - 1
+    weights = cal_weights(bin_labels, 'sqrt_inv', n_bins, lds=True)
+    print(f'max gap:{max_val:.4f} min w:{min(weights):.4f} max w:{max(weights):.4f}')
+    return weights, max_val
+
+def digitize_gap_mul(inputs, targets, max_val=None, n_bins=200):
+    B, XL, D = inputs.shape
+    B, YL, D = targets.shape
+
+    CL = YL if XL > YL else XL
+    diff_mus = z_test(inputs, targets)
+
+    weights = []
+    for d in range(D):
+        max_val = diff_mus[:, d].max()
+        min_val = diff_mus[:, d].min()
+        print(diff_mus.shape, max_val, min_val)
+        bins = np.linspace(min_val, max_val, n_bins)
+        bin_labels = np.digitize(diff_mus[:, d], bins=bins) - 1
+        weight = cal_weights(bin_labels, 'sqrt_inv', n_bins, lds=True)
+        weights.append(weight)
+        print(f'max gap:{max_val:.4f} min w:{min(weight):.4f} max w:{max(weight):.4f}')
+    return torch.tensor(weights).transpose(0, 1).float(), max_val
 
 class Dataset_ETT_hour(Dataset):
     def __init__(self, root_path, flag='train', size=None,
                  features='S', data_path='ETTh1.csv',
-                 target='OT', scale=True, timeenc=0, freq='h'):
+                 target='OT', scale=True, timeenc=0, freq='h', reweight=None, max_val=None):
         # size [seq_len, label_len, pred_len]
         # info
         if size == None:
@@ -30,6 +180,8 @@ class Dataset_ETT_hour(Dataset):
         type_map = {'train': 0, 'val': 1, 'test': 2}
         self.set_type = type_map[flag]
 
+        self.reweight = reweight
+        self.max_val = max_val
         self.features = features
         self.target = target
         self.scale = scale
@@ -39,6 +191,30 @@ class Dataset_ETT_hour(Dataset):
         self.root_path = root_path
         self.data_path = data_path
         self.__read_data__()
+        self.weights = torch.ones((self.__len__(), 1))
+        if (self.reweight == 'lds') and (flag =='train'):
+            decompose = True
+            self._prepare_weights(decompose)
+
+    def _prepare_weights(self, decompose=False):
+        train_inputs, train_targets = [], []
+        for index in range(self.__len__()):
+            seq_x, seq_y, seq_x_mark, seq_y_mark, _ = self.__getitem__(index)
+            train_inputs.append(seq_x)
+            train_targets.append(seq_y[-self.pred_len:])
+
+        train_inputs = np.stack(train_inputs, axis=0)
+        train_targets = np.stack(train_targets, axis=0)
+        print(train_inputs.shape, train_targets.shape)
+
+        if decompose:
+            print('Local Discrepancy on Remainder from TS decomposition')
+            remainder_inputs, remainder_targets = get_decomposed_data(train_inputs, train_targets)
+            self.weights, self.max_val = digitize_gap_mul(remainder_inputs, remainder_targets, max_val=self.max_val)
+        else:
+            print('Local Discrepancy on Raw Series')
+            self.weights, self.max_val = digitize_gap_mul(train_inputs, train_targets, max_val=self.max_val)
+
 
     def __read_data__(self):
         self.scaler = StandardScaler()
@@ -90,7 +266,7 @@ class Dataset_ETT_hour(Dataset):
         seq_x_mark = self.data_stamp[s_begin:s_end]
         seq_y_mark = self.data_stamp[r_begin:r_end]
 
-        return seq_x, seq_y, seq_x_mark, seq_y_mark
+        return seq_x, seq_y, seq_x_mark, seq_y_mark, self.weights[index]
 
     def __len__(self):
         return len(self.data_x) - self.seq_len - self.pred_len + 1
@@ -102,7 +278,7 @@ class Dataset_ETT_hour(Dataset):
 class Dataset_ETT_minute(Dataset):
     def __init__(self, root_path, flag='train', size=None,
                  features='S', data_path='ETTm1.csv',
-                 target='OT', scale=True, timeenc=0, freq='t'):
+                 target='OT', scale=True, timeenc=0, freq='t', reweight=None, max_val=None):
         # size [seq_len, label_len, pred_len]
         # info
         if size == None:
@@ -127,6 +303,31 @@ class Dataset_ETT_minute(Dataset):
         self.root_path = root_path
         self.data_path = data_path
         self.__read_data__()
+
+        self.reweight = reweight
+        self.max_val = max_val
+        self.weights = torch.ones((self.__len__(), 1))
+        if (self.reweight == 'lds') and (flag =='train'):
+            decompose = True
+            self._prepare_weights(decompose)
+
+    def _prepare_weights(self, decompose=False):
+        train_inputs, train_targets = [], []
+        for index in range(self.__len__()):
+            seq_x, seq_y, seq_x_mark, seq_y_mark, _ = self.__getitem__(index)
+            train_inputs.append(seq_x)
+            train_targets.append(seq_y[-self.pred_len:])
+        train_inputs = np.stack(train_inputs, axis=0)
+        train_targets = np.stack(train_targets, axis=0)
+        print(train_inputs.shape, train_targets.shape)
+
+        if decompose:
+            print('Local Discrepancy on Remainder from TS decomposition')
+            remainder_inputs, remainder_targets = get_decomposed_data(train_inputs, train_targets)
+            self.weights, self.max_val = digitize_gap_mul(remainder_inputs, remainder_targets, max_val=self.max_val)
+        else:
+            print('Local Discrepancy on Raw Series')
+            self.weights, self.max_val = digitize_gap_mul(train_inputs, train_targets, max_val=self.max_val)
 
     def __read_data__(self):
         self.scaler = StandardScaler()
@@ -180,7 +381,7 @@ class Dataset_ETT_minute(Dataset):
         seq_x_mark = self.data_stamp[s_begin:s_end]
         seq_y_mark = self.data_stamp[r_begin:r_end]
 
-        return seq_x, seq_y, seq_x_mark, seq_y_mark
+        return seq_x, seq_y, seq_x_mark, seq_y_mark, self.weights[index]
 
     def __len__(self):
         return len(self.data_x) - self.seq_len - self.pred_len + 1
@@ -192,7 +393,7 @@ class Dataset_ETT_minute(Dataset):
 class Dataset_Custom(Dataset):
     def __init__(self, root_path, flag='train', size=None,
                  features='S', data_path='ETTh1.csv',
-                 target='OT', scale=True, timeenc=0, freq='h'):
+                 target='OT', scale=True, timeenc=0, freq='h', reweight=None, max_val=None):
         # size [seq_len, label_len, pred_len]
         # info
         if size == None:
@@ -217,6 +418,31 @@ class Dataset_Custom(Dataset):
         self.root_path = root_path
         self.data_path = data_path
         self.__read_data__()
+
+        self.reweight = reweight
+        self.max_val = max_val
+        self.weights = torch.ones((self.__len__(), 1))
+        if (self.reweight == 'lds') and (flag =='train'):
+            decompose = True
+            self._prepare_weights(decompose)
+
+    def _prepare_weights(self, decompose=False):
+        train_inputs, train_targets = [], []
+        for index in range(self.__len__()):
+            seq_x, seq_y, seq_x_mark, seq_y_mark, _ = self.__getitem__(index)
+            train_inputs.append(seq_x)
+            train_targets.append(seq_y[-self.pred_len:])
+        train_inputs = np.stack(train_inputs, axis=0)
+        train_targets = np.stack(train_targets, axis=0)
+        print(train_inputs.shape, train_targets.shape)
+
+        if decompose:
+            print('Local Discrepancy on Remainder from TS decomposition')
+            remainder_inputs, remainder_targets = get_decomposed_data(train_inputs, train_targets)
+            self.weights, self.max_val = digitize_gap_mul(remainder_inputs, remainder_targets, max_val=self.max_val)
+        else:
+            print('Local Discrepancy on Raw Series')
+            self.weights, self.max_val = digitize_gap_mul(train_inputs, train_targets, max_val=self.max_val)
 
     def __read_data__(self):
         self.scaler = StandardScaler()
@@ -279,7 +505,7 @@ class Dataset_Custom(Dataset):
         seq_x_mark = self.data_stamp[s_begin:s_end]
         seq_y_mark = self.data_stamp[r_begin:r_end]
 
-        return seq_x, seq_y, seq_x_mark, seq_y_mark
+        return seq_x, seq_y, seq_x_mark, seq_y_mark, self.weights[index]
 
     def __len__(self):
         return len(self.data_x) - self.seq_len - self.pred_len + 1

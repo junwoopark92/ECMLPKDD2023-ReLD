@@ -35,8 +35,8 @@ class Exp_Main(Exp_Basic):
             model = nn.DataParallel(model, device_ids=self.args.device_ids)
         return model
 
-    def _get_data(self, flag):
-        data_set, data_loader = data_provider(self.args, flag)
+    def _get_data(self, flag, max_val=None):
+        data_set, data_loader = data_provider(self.args, flag, max_val=max_val)
         return data_set, data_loader
 
     def _select_optimizer(self):
@@ -44,14 +44,14 @@ class Exp_Main(Exp_Basic):
         return model_optim
 
     def _select_criterion(self):
-        criterion = nn.MSELoss()
+        criterion = nn.MSELoss(reduction='none')
         return criterion
 
     def vali(self, vali_data, vali_loader, criterion):
         total_loss = []
         self.model.eval()
         with torch.no_grad():
-            for i, (batch_x, batch_y, batch_x_mark, batch_y_mark) in enumerate(vali_loader):
+            for i, (batch_x, batch_y, batch_x_mark, batch_y_mark, weight) in enumerate(vali_loader):
                 batch_x = batch_x.float().to(self.device)
                 batch_y = batch_y.float()
 
@@ -81,6 +81,9 @@ class Exp_Main(Exp_Basic):
                 true = batch_y.detach().cpu()
 
                 loss = criterion(pred, true)
+                B, L, D = loss.shape
+                B, D = weight.shape
+                loss = (loss.mean(dim=1)*weight).mean()
 
                 total_loss.append(loss)
         total_loss = np.average(total_loss)
@@ -89,8 +92,9 @@ class Exp_Main(Exp_Basic):
 
     def train(self, setting):
         train_data, train_loader = self._get_data(flag='train')
-        vali_data, vali_loader = self._get_data(flag='val')
-        test_data, test_loader = self._get_data(flag='test')
+        max_val = train_data.max_val
+        vali_data, vali_loader = self._get_data(flag='val', max_val=max_val)
+        test_data, test_loader = self._get_data(flag='test', max_val=max_val)
 
         path = os.path.join(self.args.checkpoints, setting)
         if not os.path.exists(path):
@@ -113,10 +117,12 @@ class Exp_Main(Exp_Basic):
 
             self.model.train()
             epoch_time = time.time()
-            for i, (batch_x, batch_y, batch_x_mark, batch_y_mark) in enumerate(train_loader):
+            for i, (batch_x, batch_y, batch_x_mark, batch_y_mark, weight) in enumerate(train_loader):
                 iter_count += 1
                 model_optim.zero_grad()
                 batch_x = batch_x.float().to(self.device)
+
+                weight = weight.float().to(self.device)
 
                 batch_y = batch_y.float().to(self.device)
                 batch_x_mark = batch_x_mark.float().to(self.device)
@@ -149,6 +155,9 @@ class Exp_Main(Exp_Basic):
                     outputs = outputs[:, -self.args.pred_len:, f_dim:]
                     batch_y = batch_y[:, -self.args.pred_len:, f_dim:].to(self.device)
                     loss = criterion(outputs, batch_y)
+                    B, L, D = loss.shape
+                    B, D = weight.shape
+                    loss = (loss.mean(dim=1)*weight).mean()
                     train_loss.append(loss.item())
 
                 if (i + 1) % 100 == 0:
@@ -189,18 +198,19 @@ class Exp_Main(Exp_Basic):
     def test(self, setting, test=0):
         test_data, test_loader = self._get_data(flag='test')
         if test:
-            print('loading model')
+            print('loading model', os.getcwd())
             self.model.load_state_dict(torch.load(os.path.join('./checkpoints/' + setting, 'checkpoint.pth')))
 
         preds = []
         trues = []
+        inputs = []
         folder_path = './test_results/' + setting + '/'
         if not os.path.exists(folder_path):
             os.makedirs(folder_path)
 
         self.model.eval()
         with torch.no_grad():
-            for i, (batch_x, batch_y, batch_x_mark, batch_y_mark) in enumerate(test_loader):
+            for i, (batch_x, batch_y, batch_x_mark, batch_y_mark, weight) in enumerate(test_loader):
                 batch_x = batch_x.float().to(self.device)
                 batch_y = batch_y.float().to(self.device)
 
@@ -232,7 +242,9 @@ class Exp_Main(Exp_Basic):
 
                 pred = outputs  # outputs.detach().cpu().numpy()  # .squeeze()
                 true = batch_y  # batch_y.detach().cpu().numpy()  # .squeeze()
+                input_ = batch_x.detach().cpu().numpy()
 
+                inputs.append(input_)
                 preds.append(pred)
                 trues.append(true)
                 if i % 20 == 0:
@@ -243,7 +255,9 @@ class Exp_Main(Exp_Basic):
 
         preds = np.array(preds)
         trues = np.array(trues)
+        inputs = np.array(inputs)
         print('test shape:', preds.shape, trues.shape)
+        inputs = inputs.reshape(-1, inputs.shape[-2], inputs.shape[-1])
         preds = preds.reshape(-1, preds.shape[-2], preds.shape[-1])
         trues = trues.reshape(-1, trues.shape[-2], trues.shape[-1])
         print('test shape:', preds.shape, trues.shape)
@@ -252,6 +266,11 @@ class Exp_Main(Exp_Basic):
         folder_path = './results/' + setting + '/'
         if not os.path.exists(folder_path):
             os.makedirs(folder_path)
+
+        if self.args.denorm:
+            preds = test_loader.dataset.inverse_transform(preds)
+            trues = test_loader.dataset.inverse_transform(trues)
+            inputs = test_loader.dataset.inverse_transform(inputs)
 
         mae, mse, rmse, mape, mspe = metric(preds, trues)
         print('mse:{}, mae:{}'.format(mse, mae))
@@ -265,8 +284,9 @@ class Exp_Main(Exp_Basic):
         np.save(folder_path + 'metrics.npy', np.array([mae, mse, rmse, mape, mspe]))
         np.save(folder_path + 'pred.npy', preds)
         np.save(folder_path + 'true.npy', trues)
+        np.save(folder_path + 'input.npy', inputs)
 
-        return
+        return mse, mae
 
     def predict(self, setting, load=False):
         pred_data, pred_loader = self._get_data(flag='pred')
@@ -277,6 +297,7 @@ class Exp_Main(Exp_Basic):
             self.model.load_state_dict(torch.load(best_model_path))
 
         preds = []
+        inputs = []
 
         self.model.eval()
         with torch.no_grad():
@@ -301,9 +322,12 @@ class Exp_Main(Exp_Basic):
                         outputs = self.model(batch_x, batch_x_mark, dec_inp, batch_y_mark)[0]
                     else:
                         outputs = self.model(batch_x, batch_x_mark, dec_inp, batch_y_mark)
+                input_ = batch_x.detach().cpu()
                 pred = outputs.detach().cpu().numpy()  # .squeeze()
                 preds.append(pred)
+                inputs.append(input_)
 
+        inputs = torch.cat(inputs, dim=0).numpy()
         preds = np.array(preds)
         preds = preds.reshape(-1, preds.shape[-2], preds.shape[-1])
 
@@ -313,5 +337,6 @@ class Exp_Main(Exp_Basic):
             os.makedirs(folder_path)
 
         np.save(folder_path + 'real_prediction.npy', preds)
+
 
         return
