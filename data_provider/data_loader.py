@@ -113,8 +113,8 @@ def get_decomposed_data(inputs, targets):
     # remainder (IL + B - 1 + TL, D)
     remainder_windows = torch.from_numpy(np.lib.stride_tricks.sliding_window_view(remainder, (IL + TL, D)))
     remainder_windows = remainder_windows.squeeze(1) # (B, 1, IL, TL) > (B, IL, TL)
-    remainder_inputs, remainder_targets = remainder_windows[:, :IL, :],  remainder_windows[:, TL:, :]
-    print(inputs.shape, remainder_inputs.shape)
+    remainder_inputs, remainder_targets = remainder_windows[:, :IL, :],  remainder_windows[:, -TL:, :]
+
     assert inputs.shape == remainder_inputs.shape
     assert targets.shape == remainder_targets.shape
     return remainder_inputs, remainder_targets
