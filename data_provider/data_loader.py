@@ -109,7 +109,7 @@ def get_decomposed_data(inputs, targets):
     trend_series = pd.DataFrame(trend).fillna(method='bfill').fillna(method='ffill').values
     print(observed.shape, trend_series.shape, seasonal.shape)
 
-    remainder = observed - trend_series - seasonal
+    remainder = observed - seasonal # observed - trend_series - seasonal
     # remainder (IL + B - 1 + TL, D)
     remainder_windows = torch.from_numpy(np.lib.stride_tricks.sliding_window_view(remainder, (IL + TL, D)))
     remainder_windows = remainder_windows.squeeze(1) # (B, 1, IL, TL) > (B, IL, TL)
@@ -193,7 +193,7 @@ class Dataset_ETT_hour(Dataset):
         self.__read_data__()
         self.weights = torch.ones((self.__len__(), 1))
         if (self.reweight == 'lds') and (flag =='train'):
-            decompose = True
+            decompose = False
             self._prepare_weights(decompose)
 
     def _prepare_weights(self, decompose=False):
@@ -308,7 +308,7 @@ class Dataset_ETT_minute(Dataset):
         self.max_val = max_val
         self.weights = torch.ones((self.__len__(), 1))
         if (self.reweight == 'lds') and (flag =='train'):
-            decompose = True
+            decompose = False
             self._prepare_weights(decompose)
 
     def _prepare_weights(self, decompose=False):
@@ -423,7 +423,7 @@ class Dataset_Custom(Dataset):
         self.max_val = max_val
         self.weights = torch.ones((self.__len__(), 1))
         if (self.reweight == 'lds') and (flag =='train'):
-            decompose = True
+            decompose = False
             self._prepare_weights(decompose)
 
     def _prepare_weights(self, decompose=False):
