@@ -65,6 +65,28 @@ parser.add_argument('--activation', type=str, default='gelu', help='activation')
 parser.add_argument('--output_attention', action='store_true', help='whether to output attention in ecoder')
 parser.add_argument('--do_predict', action='store_true', help='whether to predict unseen future data')
 
+# Pyraformer parameters
+parser.add_argument('--pyraformer_decoder_type', type=str, default='FC', choices=['FC', 'attention'])
+parser.add_argument('--pyraformer_embed_type', type=str, default='DataEmbedding', choices=['DataEmbedding', 'CustomEmbedding'])
+parser.add_argument('--d_inner_hid', type=int, default=512)
+parser.add_argument('--d_k', type=int, default=128)
+parser.add_argument('--d_v', type=int, default=128)
+parser.add_argument('--d_bottleneck', type=int, default=128)
+parser.add_argument('--window_size', type=int, nargs='+', default=[4, 4, 4]) # The number of children of a parent node.
+parser.add_argument('--inner_size', type=int, default=3) # The number of ajacent nodes.
+parser.add_argument('--CSCM', type=str, default='Bottleneck_Construct', choices=['Bottleneck_Construct', 'Conv_Construct', 'MaxPooling_Construct', 'AvgPooling_Construct'])
+parser.add_argument('--truncate', action='store_true', default=False) # Whether to remove coarse-scale nodes from the attention structure
+parser.add_argument('--use_tvm', action='store_true', default=False) # Whether to use TVM.
+parser.add_argument('--covariate_size', type=int, default=3)
+parser.add_argument('--seq_num', type=int, default=321)
+
+# LSTNet parameters
+parser.add_argument('--d_model_skip', type=int, default=5)
+parser.add_argument('--output_fun', type=str, default='no', choices=['no', 'sigmoid', 'tanh'])
+parser.add_argument('--cnn_kernel_size', type=int, default=6)
+parser.add_argument('--rnn_skip', type=int, default=24)
+parser.add_argument('--highway_window', type=int, default=24, help='The window size of the highway component')
+
 # optimization
 parser.add_argument('--num_workers', type=int, default=4, help='data loader num workers')
 parser.add_argument('--itr', type=int, default=2, help='experiments times')
