@@ -65,6 +65,10 @@ parser.add_argument('--activation', type=str, default='gelu', help='activation')
 parser.add_argument('--output_attention', action='store_true', help='whether to output attention in ecoder')
 parser.add_argument('--do_predict', action='store_true', help='whether to predict unseen future data')
 
+# Reformer parameters
+parser.add_argument('--bucket_size', type=int, default=4, help='for Reformer')
+parser.add_argument('--n_hashes', type=int, default=4, help='for Reformer')
+
 # Pyraformer parameters
 parser.add_argument('--pyraformer_decoder_type', type=str, default='FC', choices=['FC', 'attention'])
 parser.add_argument('--pyraformer_embed_type', type=str, default='DataEmbedding', choices=['DataEmbedding', 'CustomEmbedding'])
