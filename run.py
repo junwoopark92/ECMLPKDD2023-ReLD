@@ -94,7 +94,6 @@ parser.add_argument('--highway_window', type=int, default=24, help='The window s
 
 ## for N-beats (temporal)
 parser.add_argument('--nbeats_mode', type=str, default="generic", help='[N-beats] model mode, options: [interpretable, generic]')
-
 ### interpretable
 ### default setting from: https://github.com/ElementAI/N-BEATS/blob/master/experiments/m3/interpretable.gin
 parser.add_argument('--trend_blocks', type=int, default=3, help='[N-beats interpretable] number of trend blocks')
@@ -110,6 +109,19 @@ parser.add_argument('--num_of_harmonics', type=int, default=1, help='[N-beats in
 parser.add_argument('--nb-stacks', type=int, default=30, help='[N-beats generic] number of stacks')
 parser.add_argument('--nb-layers', type=int, default=4, help='[N-beats generic] layers')
 
+# SCINet
+parser.add_argument('--num_stacks', type=int, default=1, help='')
+parser.add_argument('--num_levels', type=int, default=3, help='')
+parser.add_argument('--groups', type=int, default=1, help='')
+parser.add_argument('--modified', type=int, default=1, help='')
+parser.add_argument('--concat_len', type=int, default=0)
+parser.add_argument('--single_step', type=int, default=0)
+parser.add_argument('--single_step_output_One', type=int, default=0)
+parser.add_argument('--INN', default=1, type=int, help='use INN or basic strategy')
+parser.add_argument('--kernel', default=5, type=int, help='kernel size, 3, 5, 7')
+parser.add_argument('--dilation', default=1, type=int, help='dilation')
+parser.add_argument('--positionalE', type=bool, default=False)
+parser.add_argument('--RIN', type=bool, default=False)
 
 # optimization
 parser.add_argument('--num_workers', type=int, default=4, help='data loader num workers')
