@@ -1,6 +1,6 @@
 from data_provider.data_factory import data_provider
 from exp.exp_basic import Exp_Basic
-from models import Informer, Autoformer, Transformer, Pyraformer, LSTNet, LSTMa, Reformer
+from models import Informer, Autoformer, Transformer, Pyraformer, LSTNet, LSTMa, Reformer, Nbeats
 from utils.tools import EarlyStopping, adjust_learning_rate, visual
 from utils.metrics import metric
 
@@ -31,10 +31,11 @@ class Exp_Main(Exp_Basic):
             'Pyraformer': Pyraformer,
             'LSTNet': LSTNet,
             'LSTMa': LSTMa,
-            'Reformer': Reformer
+            'Reformer': Reformer,
+            'Nbeats': Nbeats
         }
         model = model_dict[self.args.model].Model(self.args).float()
-
+        print(model)
         if self.args.use_multi_gpu and self.args.use_gpu:
             model = nn.DataParallel(model, device_ids=self.args.device_ids)
         return model

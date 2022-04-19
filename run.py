@@ -91,6 +91,26 @@ parser.add_argument('--cnn_kernel_size', type=int, default=6)
 parser.add_argument('--rnn_skip', type=int, default=24)
 parser.add_argument('--highway_window', type=int, default=24, help='The window size of the highway component')
 
+
+## for N-beats (temporal)
+parser.add_argument('--nbeats_mode', type=str, default="generic", help='[N-beats] model mode, options: [interpretable, generic]')
+
+### interpretable
+### default setting from: https://github.com/ElementAI/N-BEATS/blob/master/experiments/m3/interpretable.gin
+parser.add_argument('--trend_blocks', type=int, default=3, help='[N-beats interpretable] number of trend blocks')
+parser.add_argument('--trend_layers', type=int, default=4, help='[N-beats interpretable] trend layers')
+parser.add_argument('--trend_layer_size', type=int, default=256, help='[N-beats interpretable] trend layer size')
+parser.add_argument('--seasonality_blocks', type=int, default=3, help='[N-beats interpretable] number of seasonality blocks')
+parser.add_argument('--seasonality_layers', type=int, default=4, help='[N-beats interpretable] seasonality layers')
+parser.add_argument('--seasonality_layer_size', type=int, default=2048, help='[N-beats interpretable] seasonality layer size')
+parser.add_argument('--degree_of_polynomial', type=int, default=2, help='[N-beats interpretable] degree of polynomial')
+parser.add_argument('--num_of_harmonics', type=int, default=1, help='[N-beats interpretable] num_of_harmonics')
+### generic
+### default setting from: https://github.com/ElementAI/N-BEATS/blob/master/experiments/m3/generic.gin
+parser.add_argument('--nb-stacks', type=int, default=30, help='[N-beats generic] number of stacks')
+parser.add_argument('--nb-layers', type=int, default=4, help='[N-beats generic] layers')
+
+
 # optimization
 parser.add_argument('--num_workers', type=int, default=4, help='data loader num workers')
 parser.add_argument('--itr', type=int, default=2, help='experiments times')
