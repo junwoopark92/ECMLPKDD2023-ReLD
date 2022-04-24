@@ -1,3 +1,2 @@
-sh mul.sh $1 $2 $3 lds > mul_$2_$3_lds.log &
-sh mul.sh $1 $2 $3 base > mul_$2_$3_base.log &
-
+sh mul.sh $1 $3 $4 lds > mul_$3_$4_lds.log &
+sh mul.sh $2 $3 $4 base > mul_$3_$4_base.log &

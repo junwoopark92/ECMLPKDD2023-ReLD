@@ -1,6 +1,6 @@
 from data_provider.data_factory import data_provider
 from exp.exp_basic import Exp_Basic
-from models import Informer, Autoformer, Transformer, Pyraformer, LSTNet, LSTMa, Reformer, Nbeats, SCINet
+from models import Informer, Autoformer, Transformer, Pyraformer, LSTNet, LSTMa, Reformer, Nbeats, SCINet, LogTrans, TCN
 from utils.tools import EarlyStopping, adjust_learning_rate, visual
 from utils.metrics import metric
 
@@ -33,7 +33,9 @@ class Exp_Main(Exp_Basic):
             'LSTMa': LSTMa,
             'Reformer': Reformer,
             'Nbeats': Nbeats,
-            'SCINet': SCINet
+            'SCINet': SCINet,
+            'Logtrans': LogTrans,
+            'TCN': TCN,
         }
         model = model_dict[self.args.model].Model(self.args).float()
         #print(model)

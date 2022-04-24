@@ -10,6 +10,7 @@ data_dict = {
     'traffic': Dataset_Custom,
     'exchange': Dataset_Custom,
     'ecl': Dataset_Custom,
+    'pump': Dataset_Custom,
     'custom': Dataset_Custom,
 }
 
