@@ -73,14 +73,16 @@ class Model(nn.Module):
         self.seq_len = configs.seq_len
         self.label_len = configs.label_len
         self.output_attention = configs.output_attention
-
+        d_model = 128 # configs.d_model
+        n_layer = 3  #configs.e_layers + configs.d_layers
         # Embedding
-        self.dec_embedding = DataEmbedding(configs.dec_in, configs.d_model, configs.embed, configs.freq,
+        self.dec_embedding = DataEmbedding(configs.dec_in, d_model, configs.embed, configs.freq,
                                            configs.dropout)
 
-        num_chans = [configs.d_model] * (configs.e_layers + configs.d_layers - 1) + [configs.d_model]
-        self.tcn = TemporalConvNet(configs.d_model, num_chans, kernel_size=2, dropout=configs.dropout)
-        self.linear_dec = nn.Linear(configs.d_model, configs.c_out)
+        num_chans = [d_model] * (n_layer - 1) + [d_model]
+        kernel_size = 10 #self.seq_len // len(num_chans)
+        self.tcn = TemporalConvNet(d_model, num_chans, kernel_size=kernel_size, dropout=configs.dropout)
+        self.linear_dec = nn.Linear(d_model, configs.c_out)
 
     def forward(self, x_enc, x_mark_enc, x_dec, x_mark_dec,
                 enc_self_mask=None, dec_self_mask=None, dec_enc_mask=None):

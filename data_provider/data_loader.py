@@ -480,11 +480,11 @@ class Dataset_Custom(Dataset):
 
         df_stamp = df_raw[['date']][border1:border2]
         df_stamp['date'] = pd.to_datetime(df_stamp.date)
-        if self.timeenc == 0:
-            df_stamp['month'] = df_stamp.date.apply(lambda row: row.month, 1)
-            df_stamp['day'] = df_stamp.date.apply(lambda row: row.day, 1)
-            df_stamp['weekday'] = df_stamp.date.apply(lambda row: row.weekday(), 1)
-            df_stamp['hour'] = df_stamp.date.apply(lambda row: row.hour, 1)
+        if self.timeenc == 0: # don't use time features
+            df_stamp['month'] = 0.0 # df_stamp.date.apply(lambda row: row.month, 1)
+            df_stamp['day'] = 0.0 # df_stamp.date.apply(lambda row: row.day, 1)
+            df_stamp['weekday'] = 0.0 # df_stamp.date.apply(lambda row: row.weekday(), 1)
+            df_stamp['hour'] = 0.0 # df_stamp.date.apply(lambda row: row.hour, 1)
             data_stamp = df_stamp.drop(['date'], 1).values
         elif self.timeenc == 1:
             data_stamp = time_features(pd.to_datetime(df_stamp['date'].values), freq=self.freq)

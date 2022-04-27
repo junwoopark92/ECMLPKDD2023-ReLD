@@ -2,15 +2,20 @@ from data_provider.data_loader import Dataset_ETT_hour, Dataset_ETT_minute, Data
 from torch.utils.data import DataLoader
 
 data_dict = {
-    'ETTh1': Dataset_ETT_hour,
-    'ETTh2': Dataset_ETT_hour,
-    'ETTm1': Dataset_ETT_minute,
-    'ETTm2': Dataset_ETT_minute,
-    'weather': Dataset_Custom,
+    'ETTh1': Dataset_ETT_hour, # 1h
+    'ETTh2': Dataset_ETT_hour, # 1h
+    'ETTm1': Dataset_ETT_minute, # 15m
+    'ETTm2': Dataset_ETT_minute, # 15m
+    'weather': Dataset_Custom, # 1h
     'traffic': Dataset_Custom,
-    'exchange': Dataset_Custom,
-    'ecl': Dataset_Custom,
-    'pump': Dataset_Custom,
+    'exchange': Dataset_Custom, # 1d
+    'ecl': Dataset_Custom, # 1h
+    'pump': Dataset_Custom, # 15m
+    'bikerent': Dataset_Custom, # 1h
+    'airquality': Dataset_Custom, # 1h
+    'stock': Dataset_Custom,
+    'copper': Dataset_Custom, # 1d
+    'patient': Dataset_Custom,
     'custom': Dataset_Custom,
 }
 
