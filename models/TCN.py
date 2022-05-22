@@ -73,7 +73,7 @@ class Model(nn.Module):
         self.seq_len = configs.seq_len
         self.label_len = configs.label_len
         self.output_attention = configs.output_attention
-        d_model = 128 # configs.d_model
+        d_model = 128 # configs.d_model 128
         n_layer = 3  #configs.e_layers + configs.d_layers
         # Embedding
         self.dec_embedding = DataEmbedding(configs.dec_in, d_model, configs.embed, configs.freq,

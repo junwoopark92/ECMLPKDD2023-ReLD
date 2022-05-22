@@ -7,8 +7,10 @@ from torch.utils.data import Dataset, DataLoader
 from sklearn.preprocessing import StandardScaler
 from utils.timefeatures import time_features
 import warnings
+from statsmodels.tsa.stattools import kpss
 from statsmodels.tsa.api import acf
 from statsmodels.tsa.seasonal import seasonal_decompose
+import pingouin as pg
 
 warnings.filterwarnings('ignore')
 
@@ -17,7 +19,7 @@ from scipy.ndimage import gaussian_filter1d
 from scipy.signal.windows import triang
 
 
-def z_test(p, s):
+def z_test(p, s, abs=False):
     p_m = p.mean(axis=1)
     p_n = p.shape[1]
     p_v = p.std(axis=1)**2
@@ -25,8 +27,65 @@ def z_test(p, s):
     s_m = s.mean(axis=1)
     s_n = s.shape[1]
     s_v = s.std(axis=1)**2
-    z = (p_m - s_m) / np.sqrt(p_v/p_n + s_v/s_n + 1e-4)
+    if abs:
+        z = np.abs(p_m - s_m) / np.sqrt(p_v/p_n + s_v/s_n + 1e-4)
+    else:
+        z = (p_m - s_m) / np.sqrt(p_v/p_n + s_v/s_n + 1e-4)
     return z
+
+
+def kpss_test(p, s, abs=False):
+    # B, L, D
+    series = np.concatenate([p,s], axis=1)
+    noise = np.random.normal(0,1e-7,series.shape)
+    series = series + noise
+    scores = []
+    B, L, D = series.shape
+    for s in series:
+        temp = []
+        for d in range(D):
+            score = kpss(s[:, d])[0]
+            temp.append(score)
+        scores.append(temp)
+    return np.array(scores) # B, D
+
+# def tsquare(X, Y, abs=False): # (C, L, B)
+#     # X and Y are 3D arrays
+#     # dim 0: number of features
+#     # dim 1: number of subjects
+#     # dim 2: number of mesh nodes or voxels (numer of tests)
+#     X = X + np.random.normal(0,1e-7,X.shape)
+#     Y = Y + np.random.normal(0,1e-7,Y.shape)
+#
+#     nx = X.shape[1] # n_samples
+#     ny = Y.shape[1]
+#     p = X.shape[0]
+#     Xbar = X.mean(1) # mean
+#     Ybar = Y.mean(1) # mean
+#     Xbar = Xbar.reshape(Xbar.shape[0], 1, Xbar.shape[1])
+#     Ybar = Ybar.reshape(Ybar.shape[0], 1, Ybar.shape[1])
+#
+#     X_Xbar = X - Xbar
+#     Y_Ybar = Y - Ybar
+#     Wx = np.einsum('ijk,ljk->ilk', X_Xbar, X_Xbar)
+#     Wy = np.einsum('ijk,ljk->ilk', Y_Ybar, Y_Ybar)
+#     W = (Wx + Wy) / float(nx + ny - 2)
+#     Xbar_minus_Ybar = Xbar - Ybar
+#     x = np.linalgnp.linalg(W.transpose(2, 0, 1),
+#                         Xbar_minus_Ybar.transpose(2, 0, 1))
+#     x = x.transpose(1, 2, 0)
+#
+#     t2 = np.sum(Xbar_minus_Ybar * x, 0)
+#     t2 = t2 * float(nx * ny) / float(nx + ny)
+#
+#     return t2 # (1, B)
+
+def tsquare(x, y, abs=False): # (B, L, D)
+    t2s = []
+    for i in range(x.shape[0]):
+        t2 = pg.multivariate_ttest(x[i],y[i])
+        t2s.append(np.sqrt(t2['T2'].iloc[0]))
+    return np.array(t2s).reshape(x.shape[0], 1)
 
 
 def get_lds_kernel_window(kernel, ks, sigma):
@@ -142,15 +201,30 @@ def digitize_gap(inputs, targets, max_val=None, n_bins=200):
     print(f'max gap:{max_val:.4f} min w:{min(weights):.4f} max w:{max(weights):.4f}')
     return weights, max_val
 
-def digitize_gap_mul(inputs, targets, max_val=None, n_bins=200):
+def digitize_gap_mul(inputs, targets, max_val=None, n_bins=200, statistic_type='lds', onlyld=False):
     B, XL, D = inputs.shape
     B, YL, D = targets.shape
 
     CL = YL if XL > YL else XL
-    diff_mus = z_test(inputs, targets)
+
+    if statistic_type == 'lds':
+        diff_mus = z_test(inputs, targets, onlyld) #kspp_test(inputs, targets, onlyld)
+    elif statistic_type == 'kpss':
+        diff_mus = kpss_test(inputs, targets, onlyld)
+    elif statistic_type == 't2':
+        diff_mus = tsquare(inputs, targets, onlyld)
+        #diff_mus = diff_mus.transpose(1, 0)
+    else:
+        raise Exception(f'Not supported statistic:{statistic_type}')
+
+    print(f'Statistic type:{statistic_type}:{diff_mus.shape}')
+    if onlyld:
+        c = 1.3
+        w = 1*c / (diff_mus + 1.0)
+        return torch.tensor(w), w.max()
 
     weights = []
-    for d in range(D):
+    for d in range(diff_mus.shape[-1]):
         max_val = diff_mus[:, d].max()
         min_val = diff_mus[:, d].min()
         print(diff_mus.shape, max_val, min_val)
@@ -159,7 +233,9 @@ def digitize_gap_mul(inputs, targets, max_val=None, n_bins=200):
         weight = cal_weights(bin_labels, 'sqrt_inv', n_bins, lds=True)
         weights.append(weight)
         print(f'max gap:{max_val:.4f} min w:{min(weight):.4f} max w:{max(weight):.4f}')
-    return torch.tensor(weights).transpose(0, 1).float(), max_val
+    return torch.tensor(weights).transpose(0, 1).float(), max_val # .clamp(0.0, 1.0)
+
+
 
 class Dataset_ETT_hour(Dataset):
     def __init__(self, root_path, flag='train', size=None,
@@ -192,11 +268,16 @@ class Dataset_ETT_hour(Dataset):
         self.data_path = data_path
         self.__read_data__()
         self.weights = torch.ones((self.__len__(), 1))
-        if (self.reweight == 'lds') and (flag =='train'):
+        if (self.reweight in ['lds', 'kpss', 't2']) and (flag =='train'):
             decompose = False
             self._prepare_weights(decompose)
+        elif (self.reweight == 'onlyld') and (flag =='train'):
+            decompose = False
+            self._prepare_weights(decompose, True)
 
-    def _prepare_weights(self, decompose=False):
+    def _prepare_weights(self, decompose=False, onlyld=False):
+        statistic_type = self.reweight
+
         train_inputs, train_targets = [], []
         for index in range(self.__len__()):
             seq_x, seq_y, seq_x_mark, seq_y_mark, _ = self.__getitem__(index)
@@ -208,12 +289,14 @@ class Dataset_ETT_hour(Dataset):
         print(train_inputs.shape, train_targets.shape)
 
         if decompose:
-            print('Local Discrepancy on Remainder from TS decomposition')
+            print(f'Local Discrepancy[only LD:{onlyld}] on Remainder from TS decomposition')
             remainder_inputs, remainder_targets = get_decomposed_data(train_inputs, train_targets)
-            self.weights, self.max_val = digitize_gap_mul(remainder_inputs, remainder_targets, max_val=self.max_val)
+            self.weights, self.max_val = digitize_gap_mul(remainder_inputs, remainder_targets,
+                                                          max_val=self.max_val, statistic_type=statistic_type, onlyld=onlyld)
         else:
-            print('Local Discrepancy on Raw Series')
-            self.weights, self.max_val = digitize_gap_mul(train_inputs, train_targets, max_val=self.max_val)
+            print(f'Local Discrepancy[only LD:{onlyld}] on Raw Series')
+            self.weights, self.max_val = digitize_gap_mul(train_inputs, train_targets,
+                                                          max_val=self.max_val, statistic_type=statistic_type, onlyld=onlyld)
 
 
     def __read_data__(self):
@@ -307,27 +390,35 @@ class Dataset_ETT_minute(Dataset):
         self.reweight = reweight
         self.max_val = max_val
         self.weights = torch.ones((self.__len__(), 1))
-        if (self.reweight == 'lds') and (flag =='train'):
+        if (self.reweight in ['lds', 'kpss', 't2']) and (flag =='train'):
             decompose = False
-            self._prepare_weights(decompose)
+            self._prepare_weights(decompose, False)
+        elif (self.reweight == 'onlyld') and (flag =='train'):
+            decompose = False
+            self._prepare_weights(decompose, True)
 
-    def _prepare_weights(self, decompose=False):
+    def _prepare_weights(self, decompose=False, onlyld=False):
+        statistic_type = self.reweight
+
         train_inputs, train_targets = [], []
         for index in range(self.__len__()):
             seq_x, seq_y, seq_x_mark, seq_y_mark, _ = self.__getitem__(index)
             train_inputs.append(seq_x)
             train_targets.append(seq_y[-self.pred_len:])
+
         train_inputs = np.stack(train_inputs, axis=0)
         train_targets = np.stack(train_targets, axis=0)
         print(train_inputs.shape, train_targets.shape)
 
         if decompose:
-            print('Local Discrepancy on Remainder from TS decomposition')
+            print(f'Local Discrepancy[only LD:{onlyld}] on Remainder from TS decomposition')
             remainder_inputs, remainder_targets = get_decomposed_data(train_inputs, train_targets)
-            self.weights, self.max_val = digitize_gap_mul(remainder_inputs, remainder_targets, max_val=self.max_val)
+            self.weights, self.max_val = digitize_gap_mul(remainder_inputs, remainder_targets,
+                                                          max_val=self.max_val, statistic_type=statistic_type, onlyld=onlyld)
         else:
-            print('Local Discrepancy on Raw Series')
-            self.weights, self.max_val = digitize_gap_mul(train_inputs, train_targets, max_val=self.max_val)
+            print(f'Local Discrepancy[only LD:{onlyld}] on Raw Series')
+            self.weights, self.max_val = digitize_gap_mul(train_inputs, train_targets,
+                                                          max_val=self.max_val, statistic_type=statistic_type, onlyld=onlyld)
 
     def __read_data__(self):
         self.scaler = StandardScaler()
@@ -422,27 +513,36 @@ class Dataset_Custom(Dataset):
         self.reweight = reweight
         self.max_val = max_val
         self.weights = torch.ones((self.__len__(), 1))
-        if (self.reweight == 'lds') and (flag =='train'):
+        if (self.reweight in ['lds', 'kpss', 't2']) and (flag =='train'):
             decompose = False
-            self._prepare_weights(decompose)
+            self._prepare_weights(decompose, False)
+        elif (self.reweight == 'onlyld') and (flag =='train'):
+            decompose = False
+            self._prepare_weights(decompose, True)
 
-    def _prepare_weights(self, decompose=False):
+    def _prepare_weights(self, decompose=False, onlyld=False):
+        statistic_type = self.reweight
+
         train_inputs, train_targets = [], []
         for index in range(self.__len__()):
             seq_x, seq_y, seq_x_mark, seq_y_mark, _ = self.__getitem__(index)
             train_inputs.append(seq_x)
             train_targets.append(seq_y[-self.pred_len:])
+
         train_inputs = np.stack(train_inputs, axis=0)
         train_targets = np.stack(train_targets, axis=0)
         print(train_inputs.shape, train_targets.shape)
 
         if decompose:
-            print('Local Discrepancy on Remainder from TS decomposition')
+            print(f'Local Discrepancy[only LD:{onlyld}] on Remainder from TS decomposition')
             remainder_inputs, remainder_targets = get_decomposed_data(train_inputs, train_targets)
-            self.weights, self.max_val = digitize_gap_mul(remainder_inputs, remainder_targets, max_val=self.max_val)
+            self.weights, self.max_val = digitize_gap_mul(remainder_inputs, remainder_targets,
+                                                          max_val=self.max_val, statistic_type=statistic_type, onlyld=onlyld)
         else:
-            print('Local Discrepancy on Raw Series')
-            self.weights, self.max_val = digitize_gap_mul(train_inputs, train_targets, max_val=self.max_val)
+            print(f'Local Discrepancy[only LD:{onlyld}] on Raw Series')
+            self.weights, self.max_val = digitize_gap_mul(train_inputs, train_targets,
+                                                          max_val=self.max_val, statistic_type=statistic_type, onlyld=onlyld)
+
 
     def __read_data__(self):
         self.scaler = StandardScaler()
