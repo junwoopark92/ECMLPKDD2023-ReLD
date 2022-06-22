@@ -1,6 +1,7 @@
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
+from layers.RevIN import RevIN
 from layers.Embed import DataEmbedding, DataEmbedding_wo_pos
 from layers.AutoCorrelation import AutoCorrelation, AutoCorrelationLayer
 from layers.Autoformer_EncDec import Encoder, Decoder, EncoderLayer, DecoderLayer, my_Layernorm, series_decomp
@@ -19,6 +20,12 @@ class Model(nn.Module):
         self.label_len = configs.label_len
         self.pred_len = configs.pred_len
         self.output_attention = configs.output_attention
+
+        self.use_revin = configs.RIN
+        print(f'RIN:{configs.RIN}')
+
+        if self.use_revin:
+            self.revin_layer = RevIN(configs.c_out)
 
         # Decomp
         kernel_size = configs.moving_avg
@@ -76,6 +83,10 @@ class Model(nn.Module):
 
     def forward(self, x_enc, x_mark_enc, x_dec, x_mark_dec,
                 enc_self_mask=None, dec_self_mask=None, dec_enc_mask=None):
+
+        if self.use_revin:
+            x_enc = self.revin_layer(x_enc, 'norm')
+
         # decomp init
         mean = torch.mean(x_enc, dim=1).unsqueeze(1).repeat(1, self.pred_len, 1)
         zeros = torch.zeros([x_dec.shape[0], self.pred_len, x_dec.shape[2]], device=x_enc.device)
@@ -92,6 +103,9 @@ class Model(nn.Module):
                                                  trend=trend_init)
         # final
         dec_out = trend_part + seasonal_part
+
+        if self.use_revin: # B, L, C
+            dec_out = self.revin_layer(dec_out, 'denorm')
 
         if self.output_attention:
             return dec_out[:, -self.pred_len:, :], attns

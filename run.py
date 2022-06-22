@@ -121,7 +121,7 @@ parser.add_argument('--INN', default=1, type=int, help='use INN or basic strateg
 parser.add_argument('--kernel', default=5, type=int, help='kernel size, 3, 5, 7')
 parser.add_argument('--dilation', default=1, type=int, help='dilation')
 parser.add_argument('--positionalE', type=bool, default=False)
-parser.add_argument('--RIN', type=bool, default=False)
+parser.add_argument('--RIN', action='store_true', default=False)
 
 # optimization
 parser.add_argument('--num_workers', type=int, default=4, help='data loader num workers')
@@ -160,7 +160,8 @@ results = []
 if args.is_training:
     for ii in range(args.itr):
         # setting record of experiments
-        setting = '{}_{}_{}_{}_ft{}_sl{}_ll{}_pl{}_dm{}_nh{}_el{}_dl{}_df{}_fc{}_eb{}_dt{}_{}_{}'.format(
+        setting = 'RevIN_{}_{}_{}_{}_{}_ft{}_sl{}_ll{}_pl{}_dm{}_nh{}_el{}_dl{}_df{}_fc{}_eb{}_dt{}_{}_{}'.format(
+            args.RIN,
             args.reweight,
             args.model_id,
             args.model,

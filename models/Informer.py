@@ -6,7 +6,13 @@ from layers.Transformer_EncDec import Decoder, DecoderLayer, Encoder, EncoderLay
 from layers.SelfAttention_Family import FullAttention, ProbAttention, AttentionLayer
 from layers.Embed import DataEmbedding
 import numpy as np
+from layers.RevIN import RevIN
 
+# >>> from RevIN import RevIN
+# >>> revin_layer = RevIN(num_features)
+# >>> x_in = revin_layer(x_in, 'norm')
+# >>> x_out = blocks(x_in) # your model or subnetwork within the model
+# >>> x_out = revin_layer(x_out, 'denorm')
 
 class Model(nn.Module):
     """
@@ -16,6 +22,12 @@ class Model(nn.Module):
         super(Model, self).__init__()
         self.pred_len = configs.pred_len
         self.output_attention = configs.output_attention
+
+        self.use_revin = configs.RIN
+        print(f'RIN:{configs.RIN}')
+
+        if self.use_revin:
+            self.revin_layer = RevIN(configs.c_out)
 
         # Embedding
         self.enc_embedding = DataEmbedding(configs.enc_in, configs.d_model, configs.embed, configs.freq,
@@ -68,11 +80,17 @@ class Model(nn.Module):
     def forward(self, x_enc, x_mark_enc, x_dec, x_mark_dec,
                 enc_self_mask=None, dec_self_mask=None, dec_enc_mask=None):
 
+        if self.use_revin:
+            x_enc = self.revin_layer(x_enc, 'norm')
+
         enc_out = self.enc_embedding(x_enc, x_mark_enc)
         enc_out, attns = self.encoder(enc_out, attn_mask=enc_self_mask)
 
         dec_out = self.dec_embedding(x_dec, x_mark_dec)
         dec_out = self.decoder(dec_out, enc_out, x_mask=dec_self_mask, cross_mask=dec_enc_mask)
+
+        if self.use_revin: # B, L, C
+            dec_out = self.revin_layer(dec_out, 'denorm')
 
         if self.output_attention:
             return dec_out[:, -self.pred_len:, :], attns
