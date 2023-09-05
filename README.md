@@ -1,5 +1,5 @@
 # Reproducing the ReLD experiment results
-
+This is an official repository for the paper, titled [Deep Imbalanced Time-series Forecasting via Local Discrepancy Density](https://arxiv.org/abs/2302.13563), accepted at ECML/PKDD'23 
 ## Environment setup
 ```
 python == 3.7
