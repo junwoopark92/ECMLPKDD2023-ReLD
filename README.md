@@ -64,3 +64,17 @@ python run.py --window_size 5 5 5 --reweight lds --is_training 1 --root_path ./d
 python run.py --window_size 5 5 5 --reweight lds --is_training 1 --root_path ./dataset/{datasetdir}/ --data_path {datasetname}.csv --model_id test --model Autoformer --data custom --features M --seq_len 336 --label_len 336 --pred_len 720 --e_layers 2 --d_layers 1 --factor 3 --enc_in 7 --dec_in 7 --c_out 7 --des 'Exp' --itr 5
 
 ```
+
+## Citation
+```
+@inproceedings{park23deep,
+  publisher = {Springer Nature Switzerland},
+  booktitle = {Proc. of Machine Learning and Knowledge Discovery in Databases: Research Track (ECML/PKDD)},
+  author    = {Junwoo Park and Jungsoo Lee and Youngin Cho and Woncheol Shin and Dongmin Kim and Jaegul Choo and Edward Choi},
+  title     = {Deep Imbalanced Time-Series Forecasting via Local Discrepancy Density},
+  year      = {2023},
+  doi       = {10.1007/978-3-031-43424-2_9},
+  pages     = {139-155},
+  url       = {https://link.springer.com/content/pdf/10.1007/978-3-031-43424-2_9}
+}
+```
